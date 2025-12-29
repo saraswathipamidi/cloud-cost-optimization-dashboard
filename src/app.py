@@ -18,7 +18,7 @@ st.title("☁️ Cloud Cost Optimization Dashboard")
 # -----------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data/cloud_costs.csv")
+   df = pd.read_csv("../data/cloud_costs.csv")
     df["billing_date"] = pd.to_datetime(df["billing_date"])
     return df
 
