@@ -2,187 +2,139 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# -------------------------------------------------
-# Page Configuration
-# -------------------------------------------------
+# -------------------------
+# Page config
+# -------------------------
 st.set_page_config(
     page_title="Cloud Cost Optimization Dashboard",
     layout="wide"
 )
 
 st.title("☁️ Cloud Cost Optimization Dashboard")
-st.markdown("Analyze, optimize, and score your cloud costs using FinOps principles.")
 
-# -------------------------------------------------
-# Load Data (SAFE PATH FIXED)
-# -------------------------------------------------
+# -------------------------
+# Load data
+# -------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("../data/cloud_cost.csv")
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df = pd.read_csv("data/cloud_costs.csv")
+    df["billing_date"] = pd.to_datetime(df["billing_date"])
     return df
 
 df = load_data()
 
-# -------------------------------------------------
+# -------------------------
 # Sidebar Filters
-# -------------------------------------------------
+# -------------------------
 st.sidebar.header("🔍 Filters")
 
-provider_filter = st.sidebar.multiselect(
-    "Cloud Provider",
+providers = st.sidebar.multiselect(
+    "Select Cloud Provider",
     options=df["cloud_provider"].unique(),
     default=df["cloud_provider"].unique()
 )
 
-service_filter = st.sidebar.multiselect(
-    "Service",
-    options=df["service"].unique(),
-    default=df["service"].unique()
-)
+filtered_df = df[df["cloud_provider"].isin(providers)]
 
-region_filter = st.sidebar.multiselect(
-    "Region",
-    options=df["region"].unique(),
-    default=df["region"].unique()
-)
-
-filtered_df = df[
-    (df["cloud_provider"].isin(provider_filter)) &
-    (df["service"].isin(service_filter)) &
-    (df["region"].isin(region_filter))
-]
-
-# -------------------------------------------------
-# KPI SECTION
-# -------------------------------------------------
-st.subheader("📊 Key Metrics")
+# -------------------------
+# KPI Metrics
+# -------------------------
+total_cost = filtered_df["cost_usd"].sum()
+services_count = filtered_df["service"].nunique()
+regions_count = filtered_df["region"].nunique()
 
 col1, col2, col3 = st.columns(3)
 
-total_cost = filtered_df["cost"].sum()
-avg_cost = filtered_df["cost"].mean()
-max_cost = filtered_df["cost"].max()
+col1.metric("💰 Total Cost (USD)", f"${total_cost:,.2f}")
+col2.metric("📦 Services", services_count)
+col3.metric("🌍 Regions", regions_count)
 
-col1.metric("💰 Total Cost ($)", f"{total_cost:.2f}")
-col2.metric("📉 Average Cost ($)", f"{avg_cost:.4f}")
-col3.metric("🔥 Highest Single Cost ($)", f"{max_cost:.4f}")
+st.divider()
 
-# -------------------------------------------------
-# FinOps Scorecard (CORE FEATURE)
-# -------------------------------------------------
-st.subheader("⭐ FinOps Scorecard (Cost Efficiency Rating)")
-
-if total_cost < 50:
-    score = 5
-    remark = "Excellent cost control"
-elif total_cost < 100:
-    score = 4
-    remark = "Good optimization"
-elif total_cost < 200:
-    score = 3
-    remark = "Moderate efficiency"
-elif total_cost < 300:
-    score = 2
-    remark = "Needs optimization"
-else:
-    score = 1
-    remark = "High cost – Immediate action needed"
-
-st.markdown(f"""
-### {'⭐' * score}
-**Rating:** {score} / 5  
-**Remark:** {remark}
-""")
-
-# -------------------------------------------------
-# Cost Trend Over Time
-# -------------------------------------------------
-st.subheader("📈 Cost Trend Over Time")
+# -------------------------
+# FinOps Scorecard
+# -------------------------
+st.subheader("⭐ FinOps Cost Efficiency Scorecard")
 
 daily_cost = (
-    filtered_df
-    .groupby(filtered_df["timestamp"].dt.date)["cost"]
-    .sum()
-    .reset_index()
+    filtered_df.groupby("billing_date", as_index=False)["cost_usd"].sum()
 )
 
-trend_fig = px.line(
-    daily_cost,
-    x="timestamp",
-    y="cost",
-    title="Daily Cloud Cost Trend",
-    markers=True
+avg_daily_cost = daily_cost["cost_usd"].mean()
+
+# Scoring Logic (simple but effective)
+score = 100
+
+if avg_daily_cost > 500:
+    score -= 25
+
+if services_count > 6:
+    score -= 20
+
+if regions_count > 4:
+    score -= 15
+
+if daily_cost["cost_usd"].iloc[-1] > daily_cost["cost_usd"].iloc[0]:
+    score -= 20
+
+score = max(score, 0)
+
+# Rating
+if score >= 80:
+    rating = "⭐⭐⭐⭐⭐ Excellent"
+elif score >= 60:
+    rating = "⭐⭐⭐⭐ Good"
+elif score >= 40:
+    rating = "⭐⭐⭐ Average"
+else:
+    rating = "⭐⭐ Needs Optimization"
+
+colA, colB = st.columns(2)
+
+colA.metric("FinOps Score", f"{score} / 100")
+colB.metric("Efficiency Rating", rating)
+
+st.info(
+    "This FinOps score evaluates cloud cost efficiency based on spend trend, "
+    "number of services, regions, and average daily cost."
 )
 
-st.plotly_chart(trend_fig, use_container_width=True)
+st.divider()
 
-# -------------------------------------------------
-# Cost by Cloud Provider
-# -------------------------------------------------
-st.subheader("☁️ Cost by Cloud Provider")
-
-provider_cost = (
-    filtered_df
-    .groupby("cloud_provider")["cost"]
-    .sum()
-    .reset_index()
-)
-
-provider_fig = px.pie(
-    provider_cost,
-    names="cloud_provider",
-    values="cost",
-    title="Cost Distribution by Provider"
-)
-
-st.plotly_chart(provider_fig, use_container_width=True)
-
-# -------------------------------------------------
+# -------------------------
 # Cost by Service
-# -------------------------------------------------
-st.subheader("🧩 Cost by Service")
+# -------------------------
+st.subheader("📊 Cost by Service")
 
 service_cost = (
-    filtered_df
-    .groupby("service")["cost"]
-    .sum()
-    .reset_index()
+    filtered_df.groupby("service", as_index=False)["cost_usd"].sum()
 )
 
-service_fig = px.bar(
+fig_service = px.bar(
     service_cost,
     x="service",
-    y="cost",
-    title="Service-wise Cost Breakdown"
+    y="cost_usd",
+    text_auto=".2s",
+    title="Cost Distribution by Service"
 )
 
-st.plotly_chart(service_fig, use_container_width=True)
+st.plotly_chart(fig_service, use_container_width=True)
 
-# -------------------------------------------------
-# Cost by Region
-# -------------------------------------------------
-st.subheader("🌍 Cost by Region")
+# -------------------------
+# Cost Over Time
+# -------------------------
+st.subheader("📈 Cost Over Time")
 
-region_cost = (
-    filtered_df
-    .groupby("region")["cost"]
-    .sum()
-    .reset_index()
+time_cost = (
+    filtered_df.groupby("billing_date", as_index=False)["cost_usd"].sum()
 )
 
-region_fig = px.bar(
-    region_cost,
-    x="region",
-    y="cost",
-    title="Region-wise Cost Distribution"
+fig_time = px.line(
+    time_cost,
+    x="billing_date",
+    y="cost_usd",
+    markers=True,
+    title="Cloud Cost Trend Over Time"
 )
 
-st.plotly_chart(region_fig, use_container_width=True)
-
-# -------------------------------------------------
-# Raw Data Viewer
-# -------------------------------------------------
-st.subheader("📄 Raw Cost Data")
-
-st.dataframe(filtered_df, use_container_width=True)
+st.plotly_chart(fig_time, use_container_width=True)
