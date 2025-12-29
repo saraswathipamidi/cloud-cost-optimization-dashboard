@@ -4,25 +4,23 @@ import numpy as np
 import plotly.express as px
 from io import BytesIO
 
-# -----------------------------
-# Page config (NO zoom jump)
-# -----------------------------
+# ---------------------------
+# Page Config
+# ---------------------------
 st.set_page_config(
     page_title="Cloud Cost Optimization Dashboard",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+    layout="wide"
 )
 
 st.title("☁️ Cloud Cost Optimization Dashboard")
 
-# -----------------------------
-# Load data (ROBUST & SAFE)
-# -----------------------------
+# ---------------------------
+# Load Data (SAFE)
+# ---------------------------
 @st.cache_data
 def load_data():
     df = pd.read_csv("data/cloud_cost.csv")
 
-    # Handle mixed date formats safely
     df["date"] = pd.to_datetime(
         df["date"],
         errors="coerce",
@@ -30,49 +28,54 @@ def load_data():
     )
 
     df = df.dropna(subset=["date"])
-
-    # Ensure numeric cost
     df["cost_usd"] = pd.to_numeric(df["cost_usd"], errors="coerce").fillna(0)
 
     return df
 
-
 df = load_data()
 
-# -----------------------------
-# Derived metrics (NO raw data shown)
-# -----------------------------
+# ---------------------------
+# REAL Cost Calculations
+# ---------------------------
 total_cost = df["cost_usd"].sum()
 
-# Assume 70% used, 30% idle (FinOps demo logic)
-used_cost = total_cost * 0.7
-idle_cost = total_cost * 0.3
+# Idle cost calculation (data-driven)
+idle_cost = 0
 
-# FinOps score (simple real logic)
-if idle_cost / total_cost < 0.2:
+for service, s_df in df.groupby("service"):
+    peak = s_df["cost_usd"].max()
+    idle_threshold = peak * 0.8
+    idle_cost += s_df[s_df["cost_usd"] < idle_threshold]["cost_usd"].sum()
+
+used_cost = total_cost - idle_cost
+
+# FinOps Score (real)
+idle_ratio = idle_cost / total_cost if total_cost > 0 else 0
+
+if idle_ratio < 0.15:
     finops_score = 5
-elif idle_cost / total_cost < 0.3:
+elif idle_ratio < 0.25:
     finops_score = 4
-elif idle_cost / total_cost < 0.4:
+elif idle_ratio < 0.35:
     finops_score = 3
-elif idle_cost / total_cost < 0.5:
+elif idle_ratio < 0.5:
     finops_score = 2
 else:
     finops_score = 1
 
-# -----------------------------
-# KPI Cards
-# -----------------------------
-col1, col2, col3, col4 = st.columns(4)
+# ---------------------------
+# KPI Section
+# ---------------------------
+c1, c2, c3, c4 = st.columns(4)
 
-col1.metric("💰 Total Cost (USD)", f"${total_cost:,.2f}")
-col2.metric("✅ Used Cost", f"${used_cost:,.2f}")
-col3.metric("⚠️ Idle Cost", f"${idle_cost:,.2f}")
-col4.metric("⭐ FinOps Score", f"{finops_score} / 5")
+c1.metric("💰 Total Cost", f"${total_cost:,.2f}")
+c2.metric("✅ Used Cost", f"${used_cost:,.2f}")
+c3.metric("⚠️ Idle Cost", f"${idle_cost:,.2f}")
+c4.metric("⭐ FinOps Score", f"{finops_score}/5")
 
-# -----------------------------
-# Cost trend chart
-# -----------------------------
+# ---------------------------
+# Monthly Trend
+# ---------------------------
 trend = (
     df.groupby(pd.Grouper(key="date", freq="M"))["cost_usd"]
     .sum()
@@ -83,21 +86,16 @@ fig_trend = px.line(
     trend,
     x="date",
     y="cost_usd",
-    title="📈 Monthly Cost Trend",
+    title="📈 Monthly Cloud Cost Trend",
     markers=True
 )
 
-fig_trend.update_layout(
-    dragmode=False,
-    xaxis_fixedrange=True,
-    yaxis_fixedrange=True
-)
-
+fig_trend.update_layout(dragmode=False)
 st.plotly_chart(fig_trend, use_container_width=True)
 
-# -----------------------------
-# Usage vs Idle chart
-# -----------------------------
+# ---------------------------
+# Used vs Idle Chart
+# ---------------------------
 usage_df = pd.DataFrame({
     "Type": ["Used Cost", "Idle Cost"],
     "Cost": [used_cost, idle_cost]
@@ -110,78 +108,79 @@ fig_usage = px.pie(
     title="⚙️ Used vs Idle Cost Distribution"
 )
 
-fig_usage.update_layout(
-    dragmode=False
-)
-
+fig_usage.update_layout(dragmode=False)
 st.plotly_chart(fig_usage, use_container_width=True)
 
-# -----------------------------
-# AI-style insights (rule based)
-# -----------------------------
-st.subheader("🧠 AI-Based Cost Optimization Tips")
+# ---------------------------
+# AI-Based Insights
+# ---------------------------
+st.subheader("🧠 AI-Based Cost Optimization Insights")
 
-tips = []
-if idle_cost / total_cost > 0.3:
-    tips.append("🔻 High idle cost detected — consider rightsizing instances.")
-if df["cost_usd"].max() > df["cost_usd"].mean() * 2:
-    tips.append("📊 Cost spikes found — enable budget alerts.")
+if idle_ratio > 0.3:
+    st.warning("🔻 High idle cost detected. Rightsizing and auto-scaling recommended.")
+if trend["cost_usd"].pct_change().max() > 0.4:
+    st.warning("📉 Cost spikes detected. Enable budget alerts.")
 if len(trend) >= 3:
-    tips.append("📈 Enough data for forecasting — plan reserved instances.")
+    st.success("📊 Enough data available for cost forecasting.")
 
-if tips:
-    for t in tips:
-        st.success(t)
-else:
-    st.info("✅ Your cloud usage is well optimized.")
-
-# -----------------------------
-# Forecast (simple & stable)
-# -----------------------------
+# ---------------------------
+# Forecast
+# ---------------------------
 st.subheader("📊 Monthly Cost Forecast")
 
 if len(trend) >= 2:
-    avg_growth = trend["cost_usd"].pct_change().mean()
-    last_cost = trend["cost_usd"].iloc[-1]
-    forecast_cost = last_cost * (1 + avg_growth)
-
-    st.metric(
-        "Next Month Forecast",
-        f"${forecast_cost:,.2f}"
-    )
+    growth = trend["cost_usd"].pct_change().mean()
+    forecast = trend["cost_usd"].iloc[-1] * (1 + growth)
+    st.metric("Next Month Forecast", f"${forecast:,.2f}")
 else:
-    st.info("Not enough data for forecasting.")
+    st.info("Not enough data for forecast.")
 
-# -----------------------------
-# DOWNLOAD SECTION (NO RAW TABLE)
-# -----------------------------
-st.subheader("⬇️ Download Reports")
+# ---------------------------
+# REPORT SUMMARY (NOT RAW DATA)
+# ---------------------------
+report_df = pd.DataFrame({
+    "Metric": [
+        "Total Cost",
+        "Used Cost",
+        "Idle Cost",
+        "Idle Percentage",
+        "FinOps Score"
+    ],
+    "Value": [
+        f"${total_cost:,.2f}",
+        f"${used_cost:,.2f}",
+        f"${idle_cost:,.2f}",
+        f"{idle_ratio*100:.1f}%",
+        f"{finops_score}/5"
+    ]
+})
 
-col_a, col_b, col_c = st.columns(3)
+st.subheader("⬇️ Download Cost Reports")
+
+c1, c2, c3 = st.columns(3)
 
 # CSV
-with col_a:
-    csv = df.to_csv(index=False).encode("utf-8")
+with c1:
     st.download_button(
         "✅ Download CSV Report",
-        csv,
-        "cloud_cost_report.csv",
+        report_df.to_csv(index=False),
+        "cloud_cost_summary.csv",
         "text/csv"
     )
 
 # Excel
-with col_b:
+with c2:
     excel_buffer = BytesIO()
-    df.to_excel(excel_buffer, index=False)
+    report_df.to_excel(excel_buffer, index=False)
     st.download_button(
         "📊 Export Excel Cost Report",
         excel_buffer.getvalue(),
-        "cloud_cost_report.xlsx",
+        "cloud_cost_summary.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-# PDF (safe – will NOT crash if missing lib)
-with col_c:
+# PDF
+with c3:
     try:
         from reportlab.platypus import SimpleDocTemplate, Paragraph
         from reportlab.lib.styles import getSampleStyleSheet
@@ -190,27 +189,20 @@ with col_c:
         doc = SimpleDocTemplate(pdf_buffer)
         styles = getSampleStyleSheet()
 
-        content = [
-            Paragraph("Cloud Cost Optimization Report", styles["Title"]),
-            Paragraph(f"Total Cost: ${total_cost:,.2f}", styles["Normal"]),
-            Paragraph(f"Used Cost: ${used_cost:,.2f}", styles["Normal"]),
-            Paragraph(f"Idle Cost: ${idle_cost:,.2f}", styles["Normal"]),
-            Paragraph(f"FinOps Score: {finops_score}/5", styles["Normal"]),
-        ]
+        elements = [Paragraph("Cloud Cost Optimization Report", styles["Title"])]
 
-        doc.build(content)
+        for _, row in report_df.iterrows():
+            elements.append(Paragraph(f"{row['Metric']}: {row['Value']}", styles["Normal"]))
+
+        doc.build(elements)
 
         st.download_button(
             "📄 Export PDF Cost Report",
             pdf_buffer.getvalue(),
-            "cloud_cost_report.pdf",
+            "cloud_cost_summary.pdf",
             "application/pdf"
         )
+    except:
+        st.info("PDF export available after installing reportlab")
 
-    except Exception:
-        st.warning("📄 PDF export requires reportlab (optional)")
-
-# -----------------------------
-# Footer
-# -----------------------------
-st.caption("🚀 FinOps-Ready | Portfolio-Grade Cloud Cost Dashboard")
+st.caption("🚀 FinOps-Ready | Data-Driven | No Raw Data Exposure")
